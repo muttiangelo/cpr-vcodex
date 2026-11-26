@@ -17,7 +17,7 @@ class SleepActivity final : public Activity {
   void renderDefaultSleepScreen() const;
   void renderCustomSleepScreen() const;
   void renderCoverSleepScreen() const;
-  void renderReadingDashboardSleepScreen() const;
+  void renderReadingDashboardSleepScreen(bool showWeeklyReading = false) const;
   void renderCoverStatsSleepScreen(bool footerOnly = false) const;
   void renderCustomStatsSleepScreen(bool footerOnly = false) const;
   // preserveBackground: draw over the retained frame (transparent overlays) instead of clearing first.
