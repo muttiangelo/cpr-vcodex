@@ -921,8 +921,11 @@ void setup() {
     TimeUtils::applySystemClockFromRtc(true);
   }
 
-  if (SETTINGS.autoSyncDay && !forceHomeBoot && !otaBoot && !koReaderRecoveryBoot && !recoveryFirmwareMode &&
-      !TimeUtils::wasTimeSyncedThisBoot()) {
+  if (SETTINGS.autoSyncDay && !forceHomeBoot && !otaBoot && !koReaderRecoveryBoot && !recoveryFirmwareMode
+#ifndef AUTO_SYNC_HEAP_PROBE
+      && !TimeUtils::wasTimeSyncedThisBoot()
+#endif
+  ) {
     RenderLock lock;
     WIFI_STORE.loadFromFile();
   }

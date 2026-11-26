@@ -8,6 +8,10 @@ class AutoDaySync {
   enum class Result { Pending, Success, Failed };
 
   bool start(bool inReader);
+#ifdef AUTO_SYNC_HEAP_PROBE
+  bool startReaderProbe(const char* bookPath);
+  static bool flushReaderProbe();
+#endif
   Result poll();
   void cancel();
   uint32_t timestamp() const { return syncedTimestamp; }

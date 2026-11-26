@@ -1,11 +1,14 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstdio>
 #include <optional>
 #include <string>
 
 #include "util/AutoDaySync.h"
 
 #define LOG_INF(...) ((void)0)
+#define LOG_ERR(...) ((void)0)
 
 enum { WIFI_OFF, WIFI_STA, WIFI_AP, WIFI_FAST_SCAN };
 enum { WL_DISCONNECTED, WL_CONNECTED, WL_CONNECT_FAILED, WL_NO_SSID_AVAIL };
@@ -66,7 +69,46 @@ static struct {
   unsigned free = 200 * 1024, largest = 80 * 1024;
   unsigned getFreeHeap() const { return free; }
   unsigned getMaxAllocHeap() const { return largest; }
+#ifdef AUTO_SYNC_HEAP_PROBE
+  unsigned getMinFreeHeap() const { return free - 100; }
+#endif
 } ESP;
+
+#ifdef AUTO_SYNC_HEAP_PROBE
+static constexpr int MALLOC_CAP_8BIT = 1;
+static constexpr int O_WRITE = 1, O_CREAT = 2, O_APPEND = 4;
+static unsigned heap_caps_get_largest_free_block(int caps) {
+  EXPECT_EQ(caps, MALLOC_CAP_8BIT);
+  return ESP.largest;
+}
+
+static std::string probeLog;
+struct HalFile {
+  bool isLog = false;
+  explicit operator bool() const { return true; }
+  size_t fileSize() const { return isLog ? probeLog.size() : 9511006; }
+  bool truncate(size_t length) {
+    EXPECT_EQ(WiFi.radioMode, WIFI_OFF);
+    probeLog.resize(length);
+    return true;
+  }
+  size_t write(const char* data, size_t length) {
+    EXPECT_EQ(WiFi.radioMode, WIFI_OFF);
+    probeLog.append(data, length);
+    return length;
+  }
+  bool close() { return true; }
+};
+static struct {
+  bool openFileForRead(const char*, const char*, HalFile&) { return true; }
+  HalFile open(const char* path, int mode) {
+    EXPECT_STREQ(path, "/.crosspoint/autosync-heap.log");
+    EXPECT_EQ(mode, O_WRITE | O_CREAT | O_APPEND);
+    EXPECT_EQ(WiFi.radioMode, WIFI_OFF);
+    return {true};
+  }
+} Storage;
+#endif
 
 static unsigned long nowMs = 0;
 static unsigned long millis() { return nowMs; }
@@ -110,6 +152,10 @@ class AutoSyncDay : public testing::Test {
     TimeUtils::timestamp = 0;
     TimeUtils::requests = 0;
     TimeUtils::stops = 0;
+#ifdef AUTO_SYNC_HEAP_PROBE
+    probe = {};
+    probeLog.clear();
+#endif
   }
 
   void StationHasAddress() {
@@ -125,6 +171,58 @@ TEST_F(AutoSyncDay, NoSavedNetworkLeavesManualScreenWithoutEnablingRadio) {
   EXPECT_EQ(WiFi.joins, 0);
   EXPECT_FALSE(activity.running());
 }
+
+#ifdef AUTO_SYNC_HEAP_PROBE
+TEST_F(AutoSyncDay, HeapProbeRecordsAllPhasesAndAllowsReopeningTrustedBook) {
+  WIFI_STORE.first = Credential{"first", ""};
+  TimeUtils::timestamp = 1704067200U;
+  attemptedThisWake = true;
+  ASSERT_TRUE(activity.startReaderProbe("/Large.epub"));
+  ASSERT_EQ(activity.poll(), Result::Pending);
+  StationHasAddress();
+  ASSERT_EQ(activity.poll(), Result::Pending);
+  ESP.free = 70000;
+  ESP.largest = 40000;
+  ASSERT_EQ(activity.poll(), Result::Pending);
+  EXPECT_TRUE(probeLog.empty());
+  ESP = {};
+  TimeUtils::ntpSucceeds = true;
+  ASSERT_EQ(activity.poll(), Result::Success);
+  EXPECT_EQ(probeLog,
+            "success bytes=9511006 before=204800/81920/204700 begin=204800/81920/204700 "
+            "connected=204800/81920/204700 ntp_pending=70000/40000/69900 poll_min=70000/40000/69900 "
+            "after_off=204800/81920/204700 path=/Large.epub\n");
+  ASSERT_TRUE(activity.startReaderProbe("/Large.epub"));
+  activity.cancel();
+  EXPECT_NE(probeLog.find("abort_reader_exit_or_sleep"), std::string::npos);
+}
+
+TEST_F(AutoSyncDay, HeapProbeDefersBusySkipAndCapsTheLog) {
+  probeLog.assign(PROBE_LOG_LIMIT - 1, 'x');
+  WiFi.radioMode = WIFI_AP;
+  EXPECT_FALSE(activity.startReaderProbe("/Large.epub"));
+  EXPECT_FALSE(AutoDaySync::flushReaderProbe());
+  EXPECT_EQ(probeLog.size(), PROBE_LOG_LIMIT - 1);
+  EXPECT_EQ(WiFi.radioMode, WIFI_AP);
+  WiFi.radioMode = WIFI_OFF;
+  EXPECT_TRUE(AutoDaySync::flushReaderProbe());
+  EXPECT_EQ(probeLog.find("skip_wifi_busy"), 0u);
+  EXPECT_EQ(std::count(probeLog.begin(), probeLog.end(), '\n'), 1);
+}
+
+TEST_F(AutoSyncDay, HeapProbeKeepsHeapFloorAndRecordsAbort) {
+  WIFI_STORE.first = Credential{"first", ""};
+  ESP.free = READER_START_FREE_HEAP - 1;
+  EXPECT_FALSE(activity.startReaderProbe("/Large.epub"));
+  EXPECT_EQ(probeLog.find("skip_low_heap"), 0u);
+  ESP = {};
+  ASSERT_TRUE(activity.startReaderProbe("/Large.epub"));
+  ESP.free = READER_MIN_FREE_HEAP - 1;
+  EXPECT_EQ(activity.poll(), Result::Failed);
+  EXPECT_EQ(WiFi.radioMode, WIFI_OFF);
+  EXPECT_NE(probeLog.find("abort_low_heap"), std::string::npos);
+}
+#endif
 
 TEST_F(AutoSyncDay, UsesLastSavedNetworkAndStopsRadioBeforeReturningDate) {
   WIFI_STORE.last = Credential{"last", "saved-pass"};

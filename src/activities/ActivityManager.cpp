@@ -178,6 +178,9 @@ void ActivityManager::loop() {
     currentActivity->loop();
   }
 
+#ifdef AUTO_SYNC_HEAP_PROBE
+  const bool probeReady = AutoDaySync::flushReaderProbe();
+#endif
   if (pendingAction != PendingAction::None) {
     readerDaySync.cancel();
     checkedReaderDate = false;
@@ -187,8 +190,15 @@ void ActivityManager::loop() {
     }
   } else if (!checkedReaderDate && currentActivity && currentActivity->hasRenderedBookPage() &&
              !requestedUpdate.load() && !RenderLock::peek()) {
+#ifdef AUTO_SYNC_HEAP_PROBE
+    if (probeReady) {
+      checkedReaderDate = true;
+      readerDaySync.startReaderProbe(APP_STATE.openEpubPath.c_str());
+    }
+#else
     checkedReaderDate = true;
     readerDaySync.start(true);
+#endif
   }
   if (pendingAction == PendingAction::None && pendingReaderDate) {
     RenderLock lock(RenderLock::Mode::Try);

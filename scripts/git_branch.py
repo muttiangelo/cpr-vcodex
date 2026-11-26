@@ -38,6 +38,7 @@ X4PRO_ENV_PREFIX = "x4pro"
 X4PRO_VERSION_SUFFIX = "-x4pro"
 SUPPORTED_ENVS = (
     "default",
+    "heapprobe",
     "gh_release",
     "gh_release_rc",
     "slim",
@@ -303,6 +304,8 @@ def inject_version(env):
     base_version = get_base_version(project_dir)
     kind_env, is_x4pro = split_env_name(env_name)
     kind_suffix = X4PRO_VERSION_SUFFIX if is_x4pro else ""
+    if env_name == "heapprobe":
+        kind_env, kind_suffix = "default", "-heapprobe"
 
     if kind_env == "default":
         release_number, release_counter_path = get_dev_release_number(project_dir, base_version)
@@ -312,6 +315,8 @@ def inject_version(env):
         # the x4pro suffix keeps the version strings (and packaged artifact
         # names) distinct so S3 and C3 dev binaries never collide.
         version_string = f"{base_version}.{release_number}.dev{build_counter}-{short_sha}{kind_suffix}"
+        if env_name == "heapprobe":
+            version_string = f"{base_version}.{release_number}-{short_sha[:7]}{kind_suffix}"
         build_kind = "dev" + kind_suffix
         print(f"CPR-vCodex release line: {release_number} ({release_counter_path})")
     elif kind_env == "gh_release":
