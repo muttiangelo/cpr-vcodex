@@ -724,6 +724,7 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
   s.frontButtonRight =
       clamp(doc["frontButtonRight"] | (uint8_t)S::FRONT_HW_RIGHT, S::FRONT_BUTTON_HARDWARE_COUNT, S::FRONT_HW_RIGHT);
   s.homeBookSource = clamp(doc["homeBookSource"] | s.homeBookSource, S::HOME_BOOK_SOURCE_COUNT, s.homeBookSource);
+  s.homeDashboard = clamp(doc["homeDashboard"] | s.homeDashboard, static_cast<uint8_t>(2), s.homeDashboard);
   s.displayDay = clamp(doc["displayDay"] | s.displayDay, S::DISPLAY_HEADER_MODE_COUNT, s.displayDay);
   migrateDisplayHeaderSettings(s, doc, needsResave);
   s.autoSyncDay = clamp(doc["autoSyncDay"] | s.autoSyncDay, static_cast<uint8_t>(2), s.autoSyncDay);
@@ -1181,6 +1182,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["frontButtonLeft"] = s.frontButtonLeft;
   doc["frontButtonRight"] = s.frontButtonRight;
   doc["homeBookSource"] = s.homeBookSource;
+  doc["homeDashboard"] = s.homeDashboard;
   doc["autoSyncDay"] = s.autoSyncDay;
   doc["sleepDirectory"] = s.sleepDirectory;
   doc["sleepImageOrder"] = s.sleepImageOrder;

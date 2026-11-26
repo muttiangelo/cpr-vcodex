@@ -492,6 +492,7 @@ class CrossPointSettings {
   uint8_t displayDay = 1;
   uint8_t autoSyncDay = 1;
   uint8_t homeBookSource = HOME_BOOKS_RECENTS;
+  uint8_t homeDashboard = 0;
   uint8_t syncDayWifiChoice = SYNC_DAY_WIFI_AUTO;
   uint8_t syncDayReminderStarts = SYNC_DAY_REMINDER_20;
   char sleepDirectory[128] = "";
