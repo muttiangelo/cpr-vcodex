@@ -30,6 +30,7 @@
 #include "CrossPointState.h"
 #include "ReadingStatsStore.h"
 #include "SdCardFontGlobals.h"
+#include "SleepDashboardData.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -39,6 +40,7 @@
 #include "util/ReadingStatsAnalytics.h"
 #include "util/SleepImageUtils.h"
 #include "util/SleepScreenCache.h"
+#include "util/TimeUtils.h"
 
 namespace {
 bool canUseSleepCache(const Bitmap& bitmap) {
@@ -245,6 +247,45 @@ void drawMetricPanel(const GfxRenderer& renderer, const Rect& rect, const char* 
   renderer.drawRoundedRect(rect.x, rect.y, rect.width, rect.height, 2, 7, true);
   drawTextClipped(renderer, SMALL_FONT_ID, rect.x + 13, rect.y + 15, label, rect.width - 26);
   drawTextClipped(renderer, UI_12_FONT_ID, rect.x + 13, rect.y + 39, value, rect.width - 26, true, EpdFontFamily::BOLD);
+}
+
+void drawWeeklyReadingChart(const GfxRenderer& renderer, const Rect& rect) {
+  using namespace sleep_dashboard;
+  const uint32_t today = READING_STATS.getReferenceDayOrdinal();
+  const Week week = collectWeek(today, READING_STATS.getReadingDays());
+  constexpr int inset = 18;
+  const int left = rect.x + inset;
+  const int width = rect.width - 2 * inset;
+  const int right = left + width;
+  const int headingY = rect.y + 16;
+  const int chartTop = headingY + renderer.getLineHeight(SMALL_FONT_ID) + 12;
+  const int baseline = rect.y + rect.height - renderer.getLineHeight(SMALL_FONT_ID) - 26;
+  char scale[24];
+  std::snprintf(scale, sizeof(scale), "%llum", static_cast<unsigned long long>(week.scaleMinutes));
+
+  renderer.drawRoundedRect(rect.x, rect.y, rect.width, rect.height, 2, 8, true);
+  drawTextWithRightValue(renderer, SMALL_FONT_ID, left, right, headingY, tr(STR_READING_TIME), scale,
+                         EpdFontFamily::BOLD);
+  renderer.fillRectDither(left, chartTop, width, 1, Color::LightGray);
+  renderer.drawLine(left, baseline, right - 1, baseline, true);
+
+  const int barWidth = width / (2 * DAY_COUNT);
+  for (int i = 0; i < DAY_COUNT; ++i) {
+    const int center = left + (2 * i + 1) * width / (2 * DAY_COUNT);
+    const int height = barHeight(week.readingMs[i], week.scaleMinutes, baseline - chartTop);
+    if (height > 0) renderer.fillRect(center - barWidth / 2, baseline - height, barWidth, height, true);
+
+    char label[4] = "--";
+    int year;
+    unsigned month, day;
+    const uint32_t ordinal = dayAt(today, i);
+    if (ordinal != 0 && TimeUtils::getDateFromDayOrdinal(ordinal, year, month, day)) {
+      std::snprintf(label, sizeof(label), "%u", day % 100);
+    }
+    const auto style = i == DAY_COUNT - 1 ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+    const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, label, style);
+    renderer.drawText(SMALL_FONT_ID, center - labelWidth / 2, baseline + 8, label, true, style);
+  }
 }
 
 std::string formatAchievementProgress(const AchievementView& view) {
@@ -1255,7 +1296,7 @@ void SleepActivity::onEnter() {
       }
       break;
     case (CrossPointSettings::SLEEP_SCREEN_MODE::READING_DASHBOARD):
-      renderReadingDashboardSleepScreen();
+      renderReadingDashboardSleepScreen(true);
       break;
     case (CrossPointSettings::SLEEP_SCREEN_MODE::COVER_STATS):
       renderCoverStatsSleepScreen();
@@ -1647,7 +1688,7 @@ void SleepActivity::renderCoverSleepScreen() const {
   return (this->*renderNoCoverSleepScreen)();
 }
 
-void SleepActivity::renderReadingDashboardSleepScreen() const {
+void SleepActivity::renderReadingDashboardSleepScreen(const bool showWeeklyReading) const {
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   const int side = 32;
@@ -1681,12 +1722,19 @@ void SleepActivity::renderReadingDashboardSleepScreen() const {
                   std::to_string(READING_STATS.getCurrentStreakDays()) + "d");
   drawMetricPanel(renderer, Rect{side + cardWidth + cardGap, metricsTop, cardWidth, cardHeight}, tr(STR_LAST_7D),
                   ReadingStatsAnalytics::formatDurationHm(READING_STATS.getRecentReadingMs(7)));
-  drawMetricPanel(renderer, Rect{side, metricsTop + cardHeight + cardGap, cardWidth, cardHeight}, tr(STR_TOTAL_TIME),
-                  ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()));
-  drawMetricPanel(renderer, Rect{side + cardWidth + cardGap, metricsTop + cardHeight + cardGap, cardWidth, cardHeight},
-                  tr(STR_BOOKS_FINISHED), std::to_string(READING_STATS.getBooksFinishedCount()));
+  const int secondRowTop = metricsTop + cardHeight + cardGap;
+  const Rect achievementPanel{side, 370, contentWidth, 138};
+  if (showWeeklyReading) {
+    drawWeeklyReadingChart(
+        renderer, Rect{side, secondRowTop, contentWidth, achievementPanel.y + achievementPanel.height - secondRowTop});
+  } else {
+    drawMetricPanel(renderer, Rect{side, secondRowTop, cardWidth, cardHeight}, tr(STR_TOTAL_TIME),
+                    ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()));
+    drawMetricPanel(renderer, Rect{side + cardWidth + cardGap, secondRowTop, cardWidth, cardHeight},
+                    tr(STR_BOOKS_FINISHED), std::to_string(READING_STATS.getBooksFinishedCount()));
+    drawAchievementPanel(renderer, achievementPanel, false);
+  }
 
-  drawAchievementPanel(renderer, Rect{side, 370, contentWidth, 138}, false);
   drawLatestBookPanel(renderer, Rect{side, 530, contentWidth, pageHeight - 578});
 
   displaySleepBuffer(renderer);

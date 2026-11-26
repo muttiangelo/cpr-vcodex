@@ -117,7 +117,6 @@ class ReadingStatsStore {
   ReadingDayStats& getOrCreateBookReadingDay(ReadingBookStats& book, uint32_t epochSeconds);
   uint32_t getLatestKnownTimestamp() const;
   uint32_t getReferenceTimestamp(uint32_t preferredTimestamp, uint32_t bookTimestamp = 0) const;
-  uint32_t getReferenceDayOrdinal() const;
   void updateBookReadTimestamp(ReadingBookStats& book, uint32_t preferredTimestamp);
   void recordReadingTime(ReadingBookStats& book, uint32_t epochSeconds, uint64_t readingMs);
   void appendSessionLogEntry(uint32_t dayOrdinal, uint32_t sessionMs, const ReadingBookStats& book);
@@ -173,6 +172,7 @@ class ReadingStatsStore {
   uint32_t getBooksFinishedCount() const;
   uint64_t getTotalReadingMs() const;
   uint64_t getTodayReadingMs() const;
+  uint32_t getReferenceDayOrdinal() const;
   uint64_t getRecentReadingMs(uint32_t days) const;
   uint32_t getCurrentStreakDays() const;
   uint32_t getMaxStreakDays() const;
