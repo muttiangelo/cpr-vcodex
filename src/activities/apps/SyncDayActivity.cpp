@@ -12,6 +12,7 @@
 #include "CrossPointState.h"
 #include "ManualDateActivity.h"
 #include "ReadingStatsStore.h"
+#include "WifiCredentialStore.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/TimezonePickerActivity.h"
 #include "components/UITheme.h"
@@ -29,6 +30,7 @@ constexpr int ROW_SET_DATE = 1;
 constexpr int ROW_WIFI_CHOICE = 2;
 constexpr int ROW_TIME_ZONE = 3;
 constexpr int ROW_DATE_FORMAT = 4;
+constexpr int ROW_AUTO_SYNC = 5;
 
 void wifiOff() {
   TimeUtils::stopNtp();
@@ -85,9 +87,10 @@ void SyncDayActivity::onEnter() {
   lastSyncSucceeded = false;
   lastSyncFailed = false;
 
-  const StrId labels[ACTION_COUNT] = {StrId::STR_SYNC_NOW, StrId::STR_SET_DATE, StrId::STR_CHOOSE_WIFI,
-                                      StrId::STR_TIME_ZONE, StrId::STR_DATE_FORMAT};
-  const UIIcon icons[ACTION_COUNT] = {UIIcon::Wifi, UIIcon::Recent, UIIcon::Settings, UIIcon::Settings, UIIcon::Recent};
+  const StrId labels[ACTION_COUNT] = {StrId::STR_SYNC_NOW,  StrId::STR_SET_DATE,    StrId::STR_CHOOSE_WIFI,
+                                      StrId::STR_TIME_ZONE, StrId::STR_DATE_FORMAT, StrId::STR_AUTO_SYNC_DAY};
+  const UIIcon icons[ACTION_COUNT] = {UIIcon::Wifi,     UIIcon::Recent, UIIcon::Settings,
+                                      UIIcon::Settings, UIIcon::Recent, UIIcon::Settings};
   for (int i = 0; i < ACTION_COUNT; ++i) {
     rowItems[i] = fui::ListItem{};
     rowItems[i].label = I18N.get(labels[i]);
@@ -95,14 +98,39 @@ void SyncDayActivity::onEnter() {
     rowItems[i].actionValue = static_cast<int16_t>(i);
   }
   refreshRowValues();
+  if (autoSync.start(false)) requestUpdate();
 }
 
 void SyncDayActivity::onExit() {
   Activity::onExit();
 
+  autoSync.cancel();
   if (!wifiConnectedOnEnter && connectedInActivity) {
     wifiOff();
   }
+}
+
+bool SyncDayActivity::handleCustomInput() {
+  if (!autoSync.running()) return syncing;
+
+  const bool wasJoining = autoSync.joining();
+  const auto result = autoSync.poll();
+  if (result == AutoDaySync::Result::Success) {
+    {
+      RenderLock lock;
+      APP_STATE.registerValidTimeSync(autoSync.timestamp());
+      APP_STATE.saveToFile();
+    }
+    lastSyncSucceeded = true;
+    requestUpdate(true);
+    createDueReadingStatsBackupWithFeedback();
+  } else if (result == AutoDaySync::Result::Failed) {
+    lastSyncFailed = true;
+    requestUpdate();
+  } else if (wasJoining && !autoSync.joining()) {
+    requestUpdate();
+  }
+  return true;
 }
 
 // Assigns the live subtitle/value text into the row-owned strings.
@@ -112,6 +140,7 @@ void SyncDayActivity::refreshRowValues() {
   rowSubtitles[ROW_WIFI_CHOICE] = getWifiChoiceLabel();
   rowSubtitles[ROW_TIME_ZONE] = getTimeZoneLabel();
   rowSubtitles[ROW_DATE_FORMAT] = getDateFormatLabel();
+  rowSubtitles[ROW_AUTO_SYNC] = SETTINGS.autoSyncDay ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
   networkStatus = isWifiConnected() ? tr(STR_CONNECTED) : tr(STR_NOT_CONNECTED);
   for (int i = 0; i < ACTION_COUNT; ++i) {
     rowItems[i].subtitle = rowSubtitles[i].c_str();
@@ -142,8 +171,16 @@ void SyncDayActivity::activateIndex(const int index) {
   } else if (index == ROW_TIME_ZONE) {
     app.clearTapFlash();
     openTimeZoneSelection();
-  } else {
+  } else if (index == ROW_DATE_FORMAT) {
     SETTINGS.dateFormat = (SETTINGS.dateFormat + 1) % CrossPointSettings::DATE_FORMAT_COUNT;
+    SETTINGS.saveToFile();
+    requestUpdate();
+  } else if (index == ROW_AUTO_SYNC) {
+    SETTINGS.autoSyncDay = !SETTINGS.autoSyncDay;
+    if (SETTINGS.autoSyncDay && !WIFI_STORE.hasCredentials()) {
+      RenderLock lock;
+      WIFI_STORE.loadFromFile();
+    }
     SETTINGS.saveToFile();
     requestUpdate();
   }
@@ -152,11 +189,13 @@ void SyncDayActivity::activateIndex(const int index) {
 void SyncDayActivity::drawChrome() { HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_SYNC_DAY)); }
 
 void SyncDayActivity::render(RenderLock&& lock) {
-  if (syncing) {
+  if (syncing || autoSync.running()) {
     renderer.clearScreen();
     drawChrome();
     const int pageHeight = renderer.getScreenHeight();
-    renderer.drawCenteredText(UI_12_FONT_ID, pageHeight / 2 - 20, tr(STR_SYNCING_TIME), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, pageHeight / 2 - 20,
+                              autoSync.joining() ? tr(STR_CONNECTING_SAVED_WIFI) : tr(STR_SYNCING_TIME), true,
+                              EpdFontFamily::BOLD);
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 8, tr(STR_SYNC_DAY_HINT));
     renderer.displayBuffer();
     return;

@@ -16,7 +16,7 @@ void ReaderPluginSession::rendered(const int progressBp) {
 }
 
 void ReaderPluginSession::openOnceRendered(const std::string& path) {
-  if (opened || !pageRendered.load(std::memory_order_acquire)) return;
+  if (opened || !hasRenderedPage()) return;
   opened = true;
   const pluginevents::Var vars[] = {{"book", path.c_str()}};
   pluginevents::emit(pluginevents::Event::ReaderOpen, vars, 1);

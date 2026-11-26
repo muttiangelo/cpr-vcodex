@@ -3,15 +3,14 @@
 #include <string>
 
 #include "activities/UiListActivity.h"
+#include "util/AutoDaySync.h"
 
-// Sync Day: five action rows (sync now, set date, Wi-Fi choice, time zone,
-// date format) with live values, a status line and the "how it works" help
-// text underneath. While an NTP sync runs the screen shows a progress note.
 class SyncDayActivity final : public UiListActivity {
-  static constexpr int ACTION_COUNT = 5;
+  static constexpr int ACTION_COUNT = 6;
 
   bool wifiConnectedOnEnter = false;
   bool connectedInActivity = false;
+  AutoDaySync autoSync;
   bool syncing = false;
   bool lastSyncSucceeded = false;
   bool lastSyncFailed = false;
@@ -34,8 +33,7 @@ class SyncDayActivity final : public UiListActivity {
   int listCount() const override { return ACTION_COUNT; }
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
-  // Input is ignored while a sync is running.
-  bool handleCustomInput() override { return syncing; }
+  bool handleCustomInput() override;
   void drawChrome() override;
 
  public:
@@ -45,5 +43,5 @@ class SyncDayActivity final : public UiListActivity {
   void onEnter() override;
   void onExit() override;
   void render(RenderLock&&) override;
-  bool preventAutoSleep() override { return syncing; }
+  bool preventAutoSleep() override { return autoSync.running() || syncing; }
 };

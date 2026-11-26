@@ -13,9 +13,19 @@
 #define LOG_DBG(...) ((void)0)
 #define LOG_ERR(...) ((void)0)
 
+#include "util/AutoDaySync.h"
+
 struct RenderLock {
+  enum class Mode { Blocking, Try };
+  explicit RenderLock(Mode = Mode::Blocking) {}
+  bool ownsLock() const { return true; }
   void unlock() {}
+  static bool peek() { return false; }
 };
+struct {
+  uint32_t registered = 0;
+  void registerValidTimeSync(uint32_t value) { registered = value; }
+} APP_STATE;
 struct GfxRenderer {};
 struct MappedInputManager {
   bool suppressedRelease = false;
@@ -60,6 +70,7 @@ class Activity {
   std::function<void()> loopAction;
   ActivityCounts* counts = nullptr;
   bool exclusiveStorage = false;
+  bool renderedBookPage = false;
   explicit Activity(std::string value, ActivityCounts* counts = nullptr) : name(std::move(value)), counts(counts) {}
   virtual ~Activity() = default;
   virtual void onEnter() {
@@ -75,6 +86,7 @@ class Activity {
   }
   bool requiresExclusiveStorageLoop() const { return exclusiveStorage; }
   bool isHomeActivity() const { return name == "Home"; }
+  bool hasRenderedBookPage() const { return renderedBookPage; }
   bool handleHomeGesture() const { return false; }
   uint8_t getUiTransitionRefreshWeight() const { return 0; }
 };
@@ -88,6 +100,28 @@ class ActivityManager {
   MappedInputManager mappedInput;
   std::vector<std::unique_ptr<Activity>> stackActivities;
   std::unique_ptr<Activity> currentActivity;
+  struct {
+    bool active = false;
+    int starts = 0, polls = 0, cancellations = 0;
+    AutoDaySync::Result result = AutoDaySync::Result::Pending;
+    bool running() const { return active; }
+    void start(bool) {
+      ++starts;
+      active = true;
+    }
+    AutoDaySync::Result poll() {
+      ++polls;
+      active = result == AutoDaySync::Result::Pending;
+      return result;
+    }
+    uint32_t timestamp() const { return 1704067200U; }
+    void cancel() {
+      if (active) ++cancellations;
+      active = false;
+    }
+  } readerDaySync;
+  bool checkedReaderDate = false;
+  uint32_t pendingReaderDate = 0;
   std::unique_ptr<Activity> pendingActivity;
   enum class PendingAction { None, Push, Pop, Replace };
   PendingAction pendingAction = PendingAction::None;
@@ -98,6 +132,7 @@ class ActivityManager {
   void goHome() { replaceActivity(std::make_unique<Activity>("Home")); }
   void loop();
   void exitActivity(const RenderLock&);
+  void registerReaderDate();
   void replaceActivity(std::unique_ptr<Activity>&&);
   void pushActivity(std::unique_ptr<Activity>&&);
   void popActivity();
@@ -105,6 +140,36 @@ class ActivityManager {
 };
 
 #include "ActivityManagerMethods.inc"
+
+TEST(ActivityLifecycle, ReaderDateSyncWaitsForFirstPageAndCancelsBeforeOpeningChild) {
+  ActivityManager manager;
+  manager.replaceActivity(std::make_unique<Activity>("EpubReader"));
+  manager.loop();
+  EXPECT_EQ(manager.readerDaySync.starts, 0);
+  manager.currentActivity->renderedBookPage = true;
+  manager.requestUpdate();
+  manager.loop();
+  EXPECT_EQ(manager.readerDaySync.starts, 0);
+  manager.loop();
+  EXPECT_EQ(manager.readerDaySync.starts, 1);
+  manager.loop();
+  EXPECT_EQ(manager.readerDaySync.polls, 1);
+  manager.pushActivity(std::make_unique<Activity>("ReaderMenu"));
+  manager.pendingActivity->enterAction = [&] { EXPECT_FALSE(manager.readerDaySync.running()); };
+  manager.loop();
+  EXPECT_EQ(manager.readerDaySync.cancellations, 1);
+}
+
+TEST(ActivityLifecycle, ReaderDateSyncRegistersSuccessfulTimestamp) {
+  ActivityManager manager;
+  manager.replaceActivity(std::make_unique<Activity>("TxtReader"));
+  manager.currentActivity->renderedBookPage = true;
+  manager.loop();
+  manager.readerDaySync.result = AutoDaySync::Result::Success;
+  APP_STATE.registered = 0;
+  manager.loop();
+  EXPECT_EQ(APP_STATE.registered, manager.readerDaySync.timestamp());
+}
 
 TEST(ActivityLifecycle, SplashlessReaderDispatchKeepsReplacementQueuedByOnEnter) {
   ActivityManager manager;

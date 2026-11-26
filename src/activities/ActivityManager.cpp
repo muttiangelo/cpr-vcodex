@@ -178,9 +178,27 @@ void ActivityManager::loop() {
     currentActivity->loop();
   }
 
+  if (pendingAction != PendingAction::None) {
+    readerDaySync.cancel();
+    checkedReaderDate = false;
+  } else if (readerDaySync.running()) {
+    if (readerDaySync.poll() == AutoDaySync::Result::Success) {
+      pendingReaderDate = readerDaySync.timestamp();
+    }
+  } else if (!checkedReaderDate && currentActivity && currentActivity->hasRenderedBookPage() &&
+             !requestedUpdate.load() && !RenderLock::peek()) {
+    checkedReaderDate = true;
+    readerDaySync.start(true);
+  }
+  if (pendingAction == PendingAction::None && pendingReaderDate) {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock()) registerReaderDate();
+  }
+
   while (pendingAction != PendingAction::None) {
     if (pendingAction == PendingAction::Pop) {
       RenderLock lock;
+      registerReaderDate();
 
       if (!currentActivity) {
         // Should never happen in practice
@@ -233,6 +251,7 @@ void ActivityManager::loop() {
     } else if (pendingActivity) {
       // Current activity has requested a new activity to be launched
       RenderLock lock;
+      registerReaderDate();
       uint8_t previousWeight =
           currentActivity ? currentActivity->getUiTransitionRefreshWeight() : deferredPreviousUiRefreshWeight;
       deferredPreviousUiRefreshWeight = 0;
@@ -276,6 +295,12 @@ void ActivityManager::loop() {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
     }
   }
+}
+
+void ActivityManager::registerReaderDate() {
+  if (!pendingReaderDate) return;
+  APP_STATE.registerValidTimeSync(pendingReaderDate);
+  pendingReaderDate = 0;
 }
 
 void ActivityManager::exitActivity(const RenderLock& lock) {

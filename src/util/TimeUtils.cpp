@@ -6,6 +6,7 @@
 #include <sys/time.h>
 
 #include <algorithm>
+#include <atomic>
 #include <ctime>
 
 #include "CrossPointSettings.h"
@@ -15,7 +16,7 @@
 
 namespace {
 constexpr uint32_t VALID_CLOCK_THRESHOLD = 1704067200UL;  // 2024-01-01 UTC
-bool syncedThisBoot = false;
+std::atomic<bool> syncedThisBoot{false};
 int lastBridgedRtcUtcHour = -1;
 
 bool writeRtcFromUtcEpoch(const uint32_t epochSeconds) {
@@ -92,7 +93,7 @@ void TimeUtils::stopNtp() {
   }
 }
 
-bool TimeUtils::syncTimeWithNtp(const uint32_t timeoutMs) {
+bool TimeUtils::startNtp() {
   configureTimezone();
   stopNtp();
 
@@ -101,17 +102,26 @@ bool TimeUtils::syncTimeWithNtp(const uint32_t timeoutMs) {
   esp_sntp_setservername(0, "pool.ntp.org");
   esp_sntp_setservername(1, "time.nist.gov");
   esp_sntp_init();
+  return initialClockValid;
+}
 
+bool TimeUtils::pollNtp(const bool initialClockValid) {
+  const auto currentTime = static_cast<uint32_t>(time(nullptr));
+  const bool currentClockValid = isClockValid(currentTime);
+  const bool syncCompleted = sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED;
+  if (!currentClockValid || (!syncCompleted && initialClockValid)) {
+    return false;
+  }
+  syncedThisBoot = true;
+  writeRtcFromUtcEpoch(currentTime);
+  return true;
+}
+
+bool TimeUtils::syncTimeWithNtp(const uint32_t timeoutMs) {
+  const bool initialClockValid = startNtp();
   const uint32_t maxRetries = std::max<uint32_t>(1, timeoutMs / 100U);
   for (uint32_t retry = 0; retry < maxRetries; ++retry) {
-    const time_t currentTime = time(nullptr);
-    const bool currentClockValid = isClockValid(static_cast<uint32_t>(currentTime));
-    const bool syncCompleted = sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED;
-    const bool clockJumpedToValid = !initialClockValid && currentClockValid;
-
-    if ((syncCompleted || clockJumpedToValid) && currentClockValid) {
-      syncedThisBoot = true;
-      writeRtcFromUtcEpoch(static_cast<uint32_t>(currentTime));
+    if (pollNtp(initialClockValid)) {
       return true;
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);
