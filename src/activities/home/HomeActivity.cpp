@@ -28,7 +28,6 @@
 #include "CrossPointState.h"
 #include "FavoritesStore.h"
 #include "HapticFeedback.h"
-#include "HomeDashboard.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "ReadingStatsStore.h"
@@ -59,8 +58,6 @@ namespace {
 constexpr unsigned long RECENT_BOOK_LONG_PRESS_MS = 1000;
 constexpr int DEFAULT_HOME_SHORTCUT_PAGE_SIZE = 4;
 constexpr int LYRA_HOME_SHORTCUT_PAGE_SIZE = 5;
-constexpr int SHORTCUT_PAGE_HEADER_HEIGHT = 34;
-constexpr int SHORTCUT_PAGE_HEADER_GAP = 12;
 constexpr const char* CAROUSEL_FRAME_CACHE_DIR = "/.crosspoint/home-carousel-cache";
 constexpr uint32_t FNV1A_OFFSET = 2166136261UL;
 constexpr uint32_t FNV1A_PRIME = 16777619UL;
@@ -326,7 +323,7 @@ uint32_t hashCarouselThumbState(uint32_t hash, const RecentBook& book) {
   return fnv1aByte(hash, Storage.exists(legacyCoverPath.c_str()) ? 1 : 0);
 }
 
-const ReadingBookStats* getHomeBookStats(const RecentBook& recentBook) {
+uint8_t getCarouselBookProgressPercent(const RecentBook& recentBook) {
   const ReadingBookStats* stats = nullptr;
   if (!recentBook.bookId.empty()) {
     stats = READING_STATS.findBook(recentBook.bookId);
@@ -334,7 +331,10 @@ const ReadingBookStats* getHomeBookStats(const RecentBook& recentBook) {
   if (stats == nullptr) {
     stats = READING_STATS.findBook(recentBook.path);
   }
-  return stats;
+  if (stats == nullptr) {
+    return 0;
+  }
+  return std::min<uint8_t>(stats->lastProgressPercent, 100);
 }
 
 uint32_t getCarouselFrameHash(const std::vector<RecentBook>& books, const int centerIdx, const int screenWidth,
@@ -345,7 +345,6 @@ uint32_t getCarouselFrameHash(const std::vector<RecentBook>& books, const int ce
   hash = fnv1aU32(hash, static_cast<uint32_t>(screenHeight));
   hash = fnv1aU32(hash, static_cast<uint32_t>(bufferSize));
   hash = fnv1aU32(hash, darkMode ? 1U : 0U);
-  if (SETTINGS.homeDashboard) hash = fnv1aU32(hash, home_dashboard::HEIGHT);
   hash = fnv1aU32(hash, static_cast<uint32_t>(SETTINGS.homeBookSource));
   hash = fnv1aU32(hash, static_cast<uint32_t>(books.size()));
   hash = fnv1aU32(hash, static_cast<uint32_t>(centerIdx));
@@ -357,8 +356,7 @@ uint32_t getCarouselFrameHash(const std::vector<RecentBook>& books, const int ce
     hash = fnv1aString(hash, book.author);
     hash = fnv1aString(hash, book.coverBmpPath);
     hash = hashCarouselThumbState(hash, book);
-    const auto* stats = getHomeBookStats(book);
-    hash = fnv1aByte(hash, stats ? std::min<uint8_t>(stats->lastProgressPercent, 100) : 0);
+    hash = fnv1aByte(hash, getCarouselBookProgressPercent(book));
   }
 
   return hash;
@@ -370,28 +368,10 @@ std::string getCarouselFrameCachePathFromHash(const uint32_t hash) {
   return filename;
 }
 
-Rect getHomeCoverRect(const GfxRenderer& renderer) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int dashboardHeight = SETTINGS.homeDashboard ? home_dashboard::HEIGHT : 0;
-  return Rect{0, metrics.homeTopPadding + dashboardHeight, renderer.getScreenWidth(),
-              metrics.homeCoverTileHeight - (isLyraCarouselTheme() ? dashboardHeight : 0)};
-}
-
-Rect getHomeShortcutsRect(const GfxRenderer& renderer, const Rect cover) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int top = cover.y + cover.height + metrics.verticalSpacing;
-  return Rect{0, top, renderer.getScreenWidth(),
-              renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing};
-}
-
-int getHomeShortcutPageSize(const GfxRenderer& renderer) {
-  const int pageSize = SETTINGS.uiTheme == CrossPointSettings::LYRA ? LYRA_HOME_SHORTCUT_PAGE_SIZE
-                                                                   : DEFAULT_HOME_SHORTCUT_PAGE_SIZE;
-  if (!SETTINGS.homeDashboard || isLyraCarouselTheme()) return pageSize;
-  const int gap = UITheme::getInstance().getMetrics().menuSpacing;
-  const int available = getHomeShortcutsRect(renderer, getHomeCoverRect(renderer)).height -
-                        SHORTCUT_PAGE_HEADER_HEIGHT - SHORTCUT_PAGE_HEADER_GAP;
-  return std::clamp((available + gap) / (GUI.getMenuRowHeight(renderer) + gap), 1, pageSize);
+int getHomeShortcutPageSize() {
+  return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA
+             ? LYRA_HOME_SHORTCUT_PAGE_SIZE
+             : DEFAULT_HOME_SHORTCUT_PAGE_SIZE;
 }
 
 bool shortcutMatchesMenuItem(const HomeShortcutEntry& entry, const HomeMenuItem item) {
@@ -984,8 +964,9 @@ bool HomeActivity::renderCarouselFrame(int bookIndex) {
   // outline; drawCarouselBorder() overlays the thick selection border at
   // display time only when the carousel row is actually active.
   LyraCarouselTheme::setPreRenderIndex(safeBookIndex);
-  GUI.drawRecentBookCover(renderer, getHomeCoverRect(renderer), recentBooks, bookCount, localCoverRendered,
-                          localCoverBufferStored, localBufferRestored, [] { return false; });
+  GUI.drawRecentBookCover(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
+                          recentBooks, bookCount, localCoverRendered, localCoverBufferStored, localBufferRestored,
+                          [] { return false; });
 
   if (!renderer.getFrameBuffer()) {
     invalidateResidentCarouselFrame();
@@ -1058,7 +1039,7 @@ void HomeActivity::loop() {
   const int menuCount = getMenuItemCount();
   const int recentCount = static_cast<int>(recentBooks.size());
   const int homeCount = std::max(0, menuCount - recentCount);
-  const int shortcutPageSize = getHomeShortcutPageSize(renderer);
+  const int shortcutPageSize = getHomeShortcutPageSize();
 
   // Back is otherwise unused on Home: resume the most recent book directly
   // (recentBooks is most-recent-first and already pruned of missing files).
@@ -1253,7 +1234,7 @@ bool HomeActivity::handleTouch() {
   }
 
   const int pageWidth = renderer.getScreenWidth();
-  const Rect cover = getHomeCoverRect(renderer);
+  const int pageHeight = renderer.getScreenHeight();
   const auto select = [this](const int index, const MappedInputManager::RowTouch touch) {
     if (touch == MappedInputManager::RowTouch::Down) {
       if (selectorIndex != index) {
@@ -1270,8 +1251,8 @@ bool HomeActivity::handleTouch() {
   // cover's column opens the focused book and the side-cover columns step the
   // carousel (column edges come from the theme's drawn cover geometry).
   if (recentCount > 0) {
-    const int tileTop = cover.y;
-    int tileBottom = cover.y + cover.height;
+    const int tileTop = metrics.homeTopPadding;
+    int tileBottom = metrics.homeTopPadding + metrics.homeCoverTileHeight;
     if (carouselTheme) {
       // The tall carousel tile can run into the icon band; the band wins there.
       tileBottom = std::min(tileBottom, LyraCarouselTheme::menuBandRect(renderer).y);
@@ -1334,16 +1315,20 @@ bool HomeActivity::handleTouch() {
 
   // Shortcut rows: same geometry as render(): a button menu below the cover
   // tile, paged with a sub-header once the entries exceed a page.
-  const Rect shortcutsRect = getHomeShortcutsRect(renderer, cover);
-  const int shortcutPageSize = getHomeShortcutPageSize(renderer);
+  const Rect shortcutsRect{
+      0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing, pageWidth,
+      pageHeight - (metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing +
+                    metrics.buttonHintsHeight + metrics.verticalSpacing)};
+  const int shortcutPageSize = getHomeShortcutPageSize();
 
   int listTop = shortcutsRect.y;
   int listHeight = shortcutsRect.height;
   int pageStart = 0;
   int pageItemCount = homeCount;
   if (homeCount > shortcutPageSize) {
-    listTop = shortcutsRect.y + SHORTCUT_PAGE_HEADER_HEIGHT + SHORTCUT_PAGE_HEADER_GAP;
-    listHeight = std::max(0, shortcutsRect.height - SHORTCUT_PAGE_HEADER_HEIGHT - SHORTCUT_PAGE_HEADER_GAP);
+    const int headerHeight = 34;
+    listTop = shortcutsRect.y + headerHeight + 12;
+    listHeight = std::max(0, shortcutsRect.height - headerHeight - 12);
     const int selectedHomeIndex = selectorIndex - recentCount;
     const int currentPage = std::max(0, selectedHomeIndex >= 0 ? selectedHomeIndex / shortcutPageSize : 0);
     pageStart = currentPage * shortcutPageSize;
@@ -1539,6 +1524,7 @@ void HomeActivity::activateSelection() {
 void HomeActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
   // Content columns clear the bezel insets on rounded panels. The header
   // self-insets in drawHeader, so only the cover/menu need it here.
   const Rect content = UITheme::getInstance().getContentArea(renderer);
@@ -1574,7 +1560,6 @@ void HomeActivity::render(RenderLock&&) {
     return;
   }
   const int recentCount = static_cast<int>(recentBooks.size());
-  const Rect cover = getHomeCoverRect(renderer);
   const bool carouselTheme = isLyraCarouselTheme();
   const bool wasFirstRenderDone = firstRenderDone;
   const bool inCarouselRow = carouselTheme && selectorIndex < recentCount;
@@ -1603,7 +1588,8 @@ void HomeActivity::render(RenderLock&&) {
       renderer.fillRect(0, 0, pageWidth, metrics.homeTopPadding, false);
       GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding}, nullptr, nullptr);
       HeaderDateUtils::drawTopLine(renderer, HeaderDateUtils::getDisplayDateText());
-      GUI.drawCarouselBorder(renderer, cover, inCarouselRow);
+      GUI.drawCarouselBorder(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
+                             inCarouselRow);
       usedCarouselFrame = true;
       residentCarouselFrameIndex = centerIdx;
       residentCarouselSelectorIndex = selectorIndex;
@@ -1620,24 +1606,13 @@ void HomeActivity::render(RenderLock&&) {
     GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding}, nullptr, nullptr);
     HeaderDateUtils::drawTopLine(renderer, HeaderDateUtils::getDisplayDateText());
 
-    coverRectX = cover.x;
-    coverRectY = cover.y;
-    coverRectW = cover.width;
-    coverRectH = cover.height;
+    coverRectX = 0;
+    coverRectY = metrics.homeTopPadding;
+    coverRectW = pageWidth;
+    coverRectH = metrics.homeCoverTileHeight;
     GUI.drawRecentBookCover(renderer, Rect{coverRectX, coverRectY, coverRectW, coverRectH}, recentBooks, selectorIndex,
                             coverRendered, coverBufferStored, bufferRestored,
                             std::bind(&HomeActivity::storeCoverBuffer, this));
-  }
-
-  if (SETTINGS.homeDashboard) {
-    const int current = carouselTheme ? wrapBookIndex(lastCarouselBookIndex, recentCount)
-                                      : (selectorIndex < recentCount ? selectorIndex : 0);
-    const auto* book = recentCount > 0 ? getHomeBookStats(recentBooks[current]) : nullptr;
-    const int inset = metrics.contentSidePadding;
-    home_dashboard::draw(renderer,
-                         Rect{content.x + inset, metrics.homeTopPadding, content.width - 2 * inset,
-                              home_dashboard::HEIGHT - metrics.verticalSpacing},
-                         book);
   }
 
   auto homeEntries = getHomeShortcutEntries(hasOpdsServers);
@@ -1645,10 +1620,13 @@ void HomeActivity::render(RenderLock&&) {
     homeEntries = buildCarouselEntries(homeEntries);
   }
   const int selectedHomeIndex = selectorIndex - static_cast<int>(recentBooks.size());
-  const Rect shortcutsRect = getHomeShortcutsRect(renderer, cover);
+  const Rect shortcutsRect{
+      0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing, pageWidth,
+      pageHeight - (metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing +
+                    metrics.buttonHintsHeight + metrics.verticalSpacing)};
 
   const int shortcutDisplayCount = static_cast<int>(homeEntries.size());
-  const int shortcutPageSize = getHomeShortcutPageSize(renderer);
+  const int shortcutPageSize = getHomeShortcutPageSize();
 
   if (carouselTheme || shortcutDisplayCount <= shortcutPageSize) {
     GUI.drawButtonMenu(
@@ -1658,8 +1636,9 @@ void HomeActivity::render(RenderLock&&) {
         [&homeEntries](const int index) { return getHomeShortcutSubtitle(homeEntries[index]); },
         [&homeEntries](const int index) { return showHomeShortcutAccessory(homeEntries[index]); });
   } else {
-    const int listTop = shortcutsRect.y + SHORTCUT_PAGE_HEADER_HEIGHT + SHORTCUT_PAGE_HEADER_GAP;
-    const int listHeight = std::max(0, shortcutsRect.height - SHORTCUT_PAGE_HEADER_HEIGHT - SHORTCUT_PAGE_HEADER_GAP);
+    const int headerHeight = 34;
+    const int listTop = shortcutsRect.y + headerHeight + 12;
+    const int listHeight = std::max(0, shortcutsRect.height - headerHeight - 12);
     const int currentPage = std::max(0, selectedHomeIndex >= 0 ? selectedHomeIndex / shortcutPageSize : 0);
     const int totalPages = (static_cast<int>(homeEntries.size()) + shortcutPageSize - 1) / shortcutPageSize;
     const int pageStart = currentPage * shortcutPageSize;
@@ -1673,8 +1652,7 @@ void HomeActivity::render(RenderLock&&) {
 
     GUI.drawSubHeader(
         renderer,
-        Rect{metrics.contentSidePadding, shortcutsRect.y, pageWidth - metrics.contentSidePadding * 2,
-             SHORTCUT_PAGE_HEADER_HEIGHT},
+        Rect{metrics.contentSidePadding, shortcutsRect.y, pageWidth - metrics.contentSidePadding * 2, headerHeight},
         sectionLabel.c_str(), pageLabel.c_str());
     GUI.drawButtonMenu(
         renderer, Rect{0, listTop, pageWidth, listHeight}, pageItemCount, localSelectedIndex,

@@ -185,7 +185,6 @@ std::vector<SettingInfo> buildDisplaySettings() {
       SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, buildUiThemeValues()),
       SettingInfo::Enum(StrId::STR_HOME_BOOK_SOURCE, &CrossPointSettings::homeBookSource,
                         {StrId::STR_RECENTS, StrId::STR_FAVORITES}),
-      SettingInfo::Toggle(StrId::STR_HOME_DASHBOARD, &CrossPointSettings::homeDashboard),
       SettingInfo::Toggle(StrId::STR_ANTI_GHOSTING_EXPERIMENTAL, &CrossPointSettings::antiGhostingExperimental),
       // Dark mode = inverted output polarity everywhere (upstream's "night
       // mode"; screenInverted aliases this field).

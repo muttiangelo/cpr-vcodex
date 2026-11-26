@@ -4,7 +4,7 @@
 #include <array>
 #include <cstdint>
 
-namespace home_dashboard {
+namespace sleep_dashboard {
 constexpr int DAY_COUNT = 7;
 constexpr uint64_t MS_PER_MINUTE = 60000;
 
@@ -39,4 +39,5 @@ inline int barHeight(const uint64_t readingMs, const uint64_t scaleMinutes, cons
   const float fraction = static_cast<float>(readingMs) / (static_cast<float>(scaleMinutes) * MS_PER_MINUTE);
   return std::clamp(static_cast<int>(height * fraction + 0.5f), 1, height);
 }
-}  // namespace home_dashboard
+
+}  // namespace sleep_dashboard

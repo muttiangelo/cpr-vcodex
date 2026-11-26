@@ -185,21 +185,18 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
   }
 
   const int screenW = renderer.getScreenWidth();
-  const int heightReduction = LyraCarouselMetrics::values.homeCoverTileHeight - rect.height;
-  const int centerCoverHeight = kCenterCoverH - heightReduction;
-  const int sideCoverHeight = kSideCoverH - heightReduction;
   const int centerTileY = rect.y + kCoverTopPad;
   const int sideTileY = centerTileY + (kCenterCoverH - kSideCoverH) / 2;
   const int centerX = (screenW - kCenterCoverW) / 2;
   const int leftX = centerX - kSideCoverW + kOverlap;
   const int rightX = centerX + kCenterCoverW - kOverlap;
 
-  auto drawCover = [&](int bookIdx, int x, int y, int maxW, int maxH, int thumbH) -> bool {
+  auto drawCover = [&](int bookIdx, int x, int y, int maxW, int maxH) -> bool {
     if (bookIdx < 0 || bookIdx >= bookCount) return false;
     const RecentBook& book = recentBooks[bookIdx];
     bool hasCover = false;
     if (!book.coverBmpPath.empty()) {
-      std::string thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, maxW, thumbH);
+      std::string thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, maxW, maxH);
       const std::string centerThumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, kCenterCoverW, kCenterCoverH);
       const std::string legacyThumbPath =
           UITheme::getCoverThumbPath(book.coverBmpPath, LyraCarouselMetrics::values.homeCoverHeight);
@@ -217,8 +214,7 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
           const float bmpRatio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
           const float tileRatio = static_cast<float>(maxW) / static_cast<float>(maxH);
           const float cropX = (bmpRatio > tileRatio) ? (1.0f - tileRatio / bmpRatio) : 0.0f;
-          const float cropY = heightReduction > 0 && bmpRatio < tileRatio ? 1.0f - bmpRatio / tileRatio : 0.0f;
-          renderer.drawBitmap(bitmap, x, y, maxW, maxH, cropX, cropY);
+          renderer.drawBitmap(bitmap, x, y, maxW, maxH, cropX, 0.0f);
           renderer.maskRoundedRectOutsideCorners(x, y, maxW, maxH, kCornerRadius, Color::White);
           hasCover = true;
         }
@@ -237,19 +233,19 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
 
     const int prevIdx = (centerIdx + bookCount - 1) % bookCount;
     const int nextIdx = (centerIdx + 1) % bookCount;
-    if (bookCount >= 3 && drawCover(prevIdx, leftX, sideTileY, kSideCoverW, sideCoverHeight, kSideCoverH)) {
-      renderer.drawRoundedRect(leftX, sideTileY, kSideCoverW, sideCoverHeight, 1, kCornerRadius, true);
+    if (bookCount >= 3 && drawCover(prevIdx, leftX, sideTileY, kSideCoverW, kSideCoverH)) {
+      renderer.drawRoundedRect(leftX, sideTileY, kSideCoverW, kSideCoverH, 1, kCornerRadius, true);
     }
-    if (bookCount >= 2 && drawCover(nextIdx, rightX, sideTileY, kSideCoverW, sideCoverHeight, kSideCoverH)) {
-      renderer.drawRoundedRect(rightX, sideTileY, kSideCoverW, sideCoverHeight, 1, kCornerRadius, true);
+    if (bookCount >= 2 && drawCover(nextIdx, rightX, sideTileY, kSideCoverW, kSideCoverH)) {
+      renderer.drawRoundedRect(rightX, sideTileY, kSideCoverW, kSideCoverH, 1, kCornerRadius, true);
     }
 
     renderer.fillRect(centerX - kCenterOutlineW, centerTileY - kCenterOutlineW, kCenterCoverW + 2 * kCenterOutlineW,
-                      centerCoverHeight + 2 * kCenterOutlineW, false);
-    drawCover(centerIdx, centerX, centerTileY, kCenterCoverW, centerCoverHeight, kCenterCoverH);
-    drawProgressBadge(renderer, recentBooks[centerIdx], centerX, centerTileY, kCenterCoverW, centerCoverHeight);
+                      kCenterCoverH + 2 * kCenterOutlineW, false);
+    drawCover(centerIdx, centerX, centerTileY, kCenterCoverW, kCenterCoverH);
+    drawProgressBadge(renderer, recentBooks[centerIdx], centerX, centerTileY, kCenterCoverW, kCenterCoverH);
 
-    const int dotsY = centerTileY + centerCoverHeight + 8;
+    const int dotsY = centerTileY + kCenterCoverH + 8;
     const int totalDotsW = bookCount * kDotSize + (bookCount - 1) * kDotGap;
     int dotX = centerX + (kCenterCoverW - totalDotsW) / 2;
     for (int i = 0; i < bookCount; ++i) {
@@ -278,7 +274,7 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
   }
 
   const int outlineW = inCarouselRow ? kSelectionLineW : kThinOutlineW;
-  renderer.drawRoundedRect(centerX, centerTileY, kCenterCoverW, centerCoverHeight, outlineW, kCornerRadius, true);
+  renderer.drawRoundedRect(centerX, centerTileY, kCenterCoverW, kCenterCoverH, outlineW, kCornerRadius, true);
 }
 
 void LyraCarouselTheme::drawCarouselBorder(GfxRenderer& renderer, Rect rect, bool inCarouselRow) const {
@@ -289,8 +285,7 @@ void LyraCarouselTheme::drawCarouselBorder(GfxRenderer& renderer, Rect rect, boo
   if (!inCarouselRow) return;
   const int centerTileY = rect.y + kCoverTopPad;
   const int centerX = (renderer.getScreenWidth() - kCenterCoverW) / 2;
-  const int centerCoverHeight = kCenterCoverH + rect.height - LyraCarouselMetrics::values.homeCoverTileHeight;
-  renderer.drawRoundedRect(centerX, centerTileY, kCenterCoverW, centerCoverHeight, kSelectionLineW, kCornerRadius, true);
+  renderer.drawRoundedRect(centerX, centerTileY, kCenterCoverW, kCenterCoverH, kSelectionLineW, kCornerRadius, true);
 }
 
 void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,

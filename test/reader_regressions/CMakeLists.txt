@@ -4,7 +4,7 @@ add_executable(reader_regressions_test
   DitherAllocationTest.cpp
   FsHelpersCaseTest.cpp
   HighlightTextMatcherTest.cpp
-  HomeDashboardTest.cpp
+    SleepDashboardTest.cpp
   ImageCacheFormatTest.cpp
   ImageDitherTest.cpp
   ImageSafetyTest.cpp
