@@ -12,6 +12,7 @@
 #include "CrossPointState.h"
 #include "ManualDateActivity.h"
 #include "ReadingStatsStore.h"
+#include "WifiCredentialStore.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/TimezonePickerActivity.h"
 #include "components/UITheme.h"
@@ -29,6 +30,8 @@ constexpr int ROW_SET_DATE = 1;
 constexpr int ROW_WIFI_CHOICE = 2;
 constexpr int ROW_TIME_ZONE = 3;
 constexpr int ROW_DATE_FORMAT = 4;
+constexpr int ROW_AUTO_SYNC = 5;
+constexpr unsigned long WIFI_JOIN_TIMEOUT_MS = 5000;
 
 void wifiOff() {
   TimeUtils::stopNtp();
@@ -85,9 +88,10 @@ void SyncDayActivity::onEnter() {
   lastSyncSucceeded = false;
   lastSyncFailed = false;
 
-  const StrId labels[ACTION_COUNT] = {StrId::STR_SYNC_NOW, StrId::STR_SET_DATE, StrId::STR_CHOOSE_WIFI,
-                                      StrId::STR_TIME_ZONE, StrId::STR_DATE_FORMAT};
-  const UIIcon icons[ACTION_COUNT] = {UIIcon::Wifi, UIIcon::Recent, UIIcon::Settings, UIIcon::Settings, UIIcon::Recent};
+  const StrId labels[ACTION_COUNT] = {StrId::STR_SYNC_NOW,  StrId::STR_SET_DATE,    StrId::STR_CHOOSE_WIFI,
+                                      StrId::STR_TIME_ZONE, StrId::STR_DATE_FORMAT, StrId::STR_AUTO_SYNC_DAY};
+  const UIIcon icons[ACTION_COUNT] = {UIIcon::Wifi,     UIIcon::Recent, UIIcon::Settings,
+                                      UIIcon::Settings, UIIcon::Recent, UIIcon::Settings};
   for (int i = 0; i < ACTION_COUNT; ++i) {
     rowItems[i] = fui::ListItem{};
     rowItems[i].label = I18N.get(labels[i]);
@@ -95,14 +99,71 @@ void SyncDayActivity::onEnter() {
     rowItems[i].actionValue = static_cast<int16_t>(i);
   }
   refreshRowValues();
+  if (SETTINGS.autoSyncDay) {
+    startAutoSync();
+  }
 }
 
 void SyncDayActivity::onExit() {
   Activity::onExit();
 
+  if (connectingToSavedWifi) {
+    finishAutoWifi();
+  }
   if (!wifiConnectedOnEnter && connectedInActivity) {
     wifiOff();
   }
+}
+
+void SyncDayActivity::startAutoSync() {
+  if (wifiConnectedOnEnter) {
+    syncTime(true);
+    return;
+  }
+
+  auto credential = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
+  if (!credential) {
+    credential = WIFI_STORE.getCredentialAt(0);
+  }
+  if (!credential) return;
+
+  WiFi.persistent(false);
+#ifndef SIMULATOR
+  restoreAutoReconnect = WiFi.getAutoReconnect();
+#endif
+  WiFi.setAutoReconnect(false);
+  connectingToSavedWifi = true;
+  wifiJoinStartedAt = millis();
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(true);
+  WiFi.setScanMethod(WIFI_FAST_SCAN);
+  WiFi.begin(credential->ssid.c_str(), credential->password.empty() ? nullptr : credential->password.c_str());
+  requestUpdate();
+}
+
+void SyncDayActivity::finishAutoWifi() {
+  TimeUtils::stopNtp();
+  WiFi.mode(WIFI_OFF);
+  wifiConnectedOnEnter = false;
+  if (connectingToSavedWifi) {
+    WiFi.setAutoReconnect(restoreAutoReconnect);
+    connectingToSavedWifi = false;
+  }
+}
+
+bool SyncDayActivity::handleCustomInput() {
+  if (!connectingToSavedWifi) return syncing;
+
+  const auto status = WiFi.status();
+  if (status == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
+    syncTime(true);
+  } else if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL ||
+             millis() - wifiJoinStartedAt >= WIFI_JOIN_TIMEOUT_MS) {
+    finishAutoWifi();
+    lastSyncFailed = true;
+    requestUpdate();
+  }
+  return true;
 }
 
 // Assigns the live subtitle/value text into the row-owned strings.
@@ -112,6 +173,7 @@ void SyncDayActivity::refreshRowValues() {
   rowSubtitles[ROW_WIFI_CHOICE] = getWifiChoiceLabel();
   rowSubtitles[ROW_TIME_ZONE] = getTimeZoneLabel();
   rowSubtitles[ROW_DATE_FORMAT] = getDateFormatLabel();
+  rowSubtitles[ROW_AUTO_SYNC] = SETTINGS.autoSyncDay ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
   networkStatus = isWifiConnected() ? tr(STR_CONNECTED) : tr(STR_NOT_CONNECTED);
   for (int i = 0; i < ACTION_COUNT; ++i) {
     rowItems[i].subtitle = rowSubtitles[i].c_str();
@@ -142,8 +204,12 @@ void SyncDayActivity::activateIndex(const int index) {
   } else if (index == ROW_TIME_ZONE) {
     app.clearTapFlash();
     openTimeZoneSelection();
-  } else {
+  } else if (index == ROW_DATE_FORMAT) {
     SETTINGS.dateFormat = (SETTINGS.dateFormat + 1) % CrossPointSettings::DATE_FORMAT_COUNT;
+    SETTINGS.saveToFile();
+    requestUpdate();
+  } else if (index == ROW_AUTO_SYNC) {
+    SETTINGS.autoSyncDay = !SETTINGS.autoSyncDay;
     SETTINGS.saveToFile();
     requestUpdate();
   }
@@ -152,11 +218,13 @@ void SyncDayActivity::activateIndex(const int index) {
 void SyncDayActivity::drawChrome() { HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_SYNC_DAY)); }
 
 void SyncDayActivity::render(RenderLock&& lock) {
-  if (syncing) {
+  if (syncing || connectingToSavedWifi) {
     renderer.clearScreen();
     drawChrome();
     const int pageHeight = renderer.getScreenHeight();
-    renderer.drawCenteredText(UI_12_FONT_ID, pageHeight / 2 - 20, tr(STR_SYNCING_TIME), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, pageHeight / 2 - 20,
+                              syncing ? tr(STR_SYNCING_TIME) : tr(STR_CONNECTING_SAVED_WIFI), true,
+                              EpdFontFamily::BOLD);
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 8, tr(STR_SYNC_DAY_HINT));
     renderer.displayBuffer();
     return;
@@ -254,7 +322,7 @@ void SyncDayActivity::openWifiSelection(const bool allowAutoConnect) {
                          });
 }
 
-void SyncDayActivity::syncTime() {
+void SyncDayActivity::syncTime(const bool automatic) {
   syncing = true;
   lastSyncSucceeded = false;
   lastSyncFailed = false;
@@ -263,6 +331,9 @@ void SyncDayActivity::syncTime() {
   const bool hadValidTimeBefore = TimeUtils::isClockValid();
   const bool ntpSuccess = TimeUtils::syncTimeWithNtp();
   const uint32_t currentValidTimestamp = TimeUtils::getCurrentValidTimestamp();
+  if (automatic) {
+    finishAutoWifi();
+  }
   const bool effectiveSuccess = ntpSuccess || (!hadValidTimeBefore && currentValidTimestamp > 0);
   if (effectiveSuccess && currentValidTimestamp > 0) {
     APP_STATE.registerValidTimeSync(currentValidTimestamp);
