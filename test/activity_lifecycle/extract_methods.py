@@ -6,7 +6,7 @@ import sys
 
 
 source = Path(sys.argv[1]).read_text(encoding="utf-8")
-methods = ("loop", "exitActivity", "replaceActivity", "pushActivity", "popActivity", "requestUpdate")
+methods = ("loop", "exitActivity", "replaceActivity", "pushActivity", "popActivity", "requestUpdate", "registerReaderDate")
 boundaries = list(re.finditer(r"^(?:void|bool|ScreenshotInfo) ActivityManager::(\w+)\(", source, re.MULTILINE))
 selected = {}
 for index, match in enumerate(boundaries):

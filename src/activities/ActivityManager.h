@@ -13,6 +13,7 @@
 
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "util/AutoDaySync.h"
 #include "util/ScreenshotInfo.h"
 
 class Activity;    // forward declaration
@@ -42,8 +43,12 @@ class ActivityManager {
   MappedInputManager& mappedInput;
   std::vector<std::unique_ptr<Activity>> stackActivities;
   std::unique_ptr<Activity> currentActivity;
+  AutoDaySync readerDaySync;
+  uint32_t pendingReaderDate = 0;
+  bool checkedReaderDate = false;
 
   void exitActivity(const RenderLock& lock);
+  void registerReaderDate();
 
   // Pending activity to be launched on next loop iteration
   std::unique_ptr<Activity> pendingActivity;
@@ -80,6 +85,7 @@ class ActivityManager {
 
   void begin();
   void loop();
+  void cancelReaderDaySync() { readerDaySync.cancel(); }
 
   // Will replace currentActivity and drop all activities on stack
   void replaceActivity(std::unique_ptr<Activity>&& newActivity);

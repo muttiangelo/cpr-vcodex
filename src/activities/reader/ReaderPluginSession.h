@@ -11,6 +11,7 @@ class ReaderPluginSession {
  public:
   void noteTurn(bool forward, bool succeeded) { session.noteTurn(forward, succeeded); }
   void rendered(int progressBp);
+  bool hasRenderedPage() const { return pageRendered.load(std::memory_order_acquire); }
   void openOnceRendered(const std::string& path);
   void flush(const std::string& path);
   void exit(const std::string& path);

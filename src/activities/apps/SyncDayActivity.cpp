@@ -31,7 +31,6 @@ constexpr int ROW_WIFI_CHOICE = 2;
 constexpr int ROW_TIME_ZONE = 3;
 constexpr int ROW_DATE_FORMAT = 4;
 constexpr int ROW_AUTO_SYNC = 5;
-constexpr unsigned long WIFI_JOIN_TIMEOUT_MS = 5000;
 
 void wifiOff() {
   TimeUtils::stopNtp();
@@ -99,68 +98,36 @@ void SyncDayActivity::onEnter() {
     rowItems[i].actionValue = static_cast<int16_t>(i);
   }
   refreshRowValues();
-  if (SETTINGS.autoSyncDay) {
-    startAutoSync();
-  }
+  if (autoSync.start(false)) requestUpdate();
 }
 
 void SyncDayActivity::onExit() {
   Activity::onExit();
 
-  if (connectingToSavedWifi) {
-    finishAutoWifi();
-  }
+  autoSync.cancel();
   if (!wifiConnectedOnEnter && connectedInActivity) {
     wifiOff();
   }
 }
 
-void SyncDayActivity::startAutoSync() {
-  if (wifiConnectedOnEnter) {
-    syncTime(true);
-    return;
-  }
-
-  auto credential = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
-  if (!credential) {
-    credential = WIFI_STORE.getCredentialAt(0);
-  }
-  if (!credential) return;
-
-  WiFi.persistent(false);
-#ifndef SIMULATOR
-  restoreAutoReconnect = WiFi.getAutoReconnect();
-#endif
-  WiFi.setAutoReconnect(false);
-  connectingToSavedWifi = true;
-  wifiJoinStartedAt = millis();
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(true);
-  WiFi.setScanMethod(WIFI_FAST_SCAN);
-  WiFi.begin(credential->ssid.c_str(), credential->password.empty() ? nullptr : credential->password.c_str());
-  requestUpdate();
-}
-
-void SyncDayActivity::finishAutoWifi() {
-  TimeUtils::stopNtp();
-  WiFi.mode(WIFI_OFF);
-  wifiConnectedOnEnter = false;
-  if (connectingToSavedWifi) {
-    WiFi.setAutoReconnect(restoreAutoReconnect);
-    connectingToSavedWifi = false;
-  }
-}
-
 bool SyncDayActivity::handleCustomInput() {
-  if (!connectingToSavedWifi) return syncing;
+  if (!autoSync.running()) return syncing;
 
-  const auto status = WiFi.status();
-  if (status == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
-    syncTime(true);
-  } else if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL ||
-             millis() - wifiJoinStartedAt >= WIFI_JOIN_TIMEOUT_MS) {
-    finishAutoWifi();
+  const bool wasJoining = autoSync.joining();
+  const auto result = autoSync.poll();
+  if (result == AutoDaySync::Result::Success) {
+    {
+      RenderLock lock;
+      APP_STATE.registerValidTimeSync(autoSync.timestamp());
+      APP_STATE.saveToFile();
+    }
+    lastSyncSucceeded = true;
+    requestUpdate(true);
+    createDueReadingStatsBackupWithFeedback();
+  } else if (result == AutoDaySync::Result::Failed) {
     lastSyncFailed = true;
+    requestUpdate();
+  } else if (wasJoining && !autoSync.joining()) {
     requestUpdate();
   }
   return true;
@@ -210,6 +177,10 @@ void SyncDayActivity::activateIndex(const int index) {
     requestUpdate();
   } else if (index == ROW_AUTO_SYNC) {
     SETTINGS.autoSyncDay = !SETTINGS.autoSyncDay;
+    if (SETTINGS.autoSyncDay && !WIFI_STORE.hasCredentials()) {
+      RenderLock lock;
+      WIFI_STORE.loadFromFile();
+    }
     SETTINGS.saveToFile();
     requestUpdate();
   }
@@ -218,12 +189,12 @@ void SyncDayActivity::activateIndex(const int index) {
 void SyncDayActivity::drawChrome() { HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_SYNC_DAY)); }
 
 void SyncDayActivity::render(RenderLock&& lock) {
-  if (syncing || connectingToSavedWifi) {
+  if (syncing || autoSync.running()) {
     renderer.clearScreen();
     drawChrome();
     const int pageHeight = renderer.getScreenHeight();
     renderer.drawCenteredText(UI_12_FONT_ID, pageHeight / 2 - 20,
-                              syncing ? tr(STR_SYNCING_TIME) : tr(STR_CONNECTING_SAVED_WIFI), true,
+                              autoSync.joining() ? tr(STR_CONNECTING_SAVED_WIFI) : tr(STR_SYNCING_TIME), true,
                               EpdFontFamily::BOLD);
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 8, tr(STR_SYNC_DAY_HINT));
     renderer.displayBuffer();
@@ -322,7 +293,7 @@ void SyncDayActivity::openWifiSelection(const bool allowAutoConnect) {
                          });
 }
 
-void SyncDayActivity::syncTime(const bool automatic) {
+void SyncDayActivity::syncTime() {
   syncing = true;
   lastSyncSucceeded = false;
   lastSyncFailed = false;
@@ -331,9 +302,6 @@ void SyncDayActivity::syncTime(const bool automatic) {
   const bool hadValidTimeBefore = TimeUtils::isClockValid();
   const bool ntpSuccess = TimeUtils::syncTimeWithNtp();
   const uint32_t currentValidTimestamp = TimeUtils::getCurrentValidTimestamp();
-  if (automatic) {
-    finishAutoWifi();
-  }
   const bool effectiveSuccess = ntpSuccess || (!hadValidTimeBefore && currentValidTimestamp > 0);
   if (effectiveSuccess && currentValidTimestamp > 0) {
     APP_STATE.registerValidTimeSync(currentValidTimestamp);

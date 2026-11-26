@@ -326,6 +326,7 @@ class EpubReaderActivity final : public Activity {
            (section->isPartial() || static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD);
   }
   bool isReaderActivity() const override { return true; }
+  bool hasRenderedBookPage() const override { return pluginSession.hasRenderedPage(); }
   bool handleForcedRefresh() override {
     {
       RenderLock lock(*this);

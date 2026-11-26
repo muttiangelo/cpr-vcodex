@@ -477,6 +477,7 @@ static void deliverSleepPluginEvents() {
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+  activityManager.cancelReaderDaySync();
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   APP_STATE.flashcardResumePath.clear();
 
@@ -918,6 +919,12 @@ void setup() {
 
   if (halClock.isAvailable() && SETTINGS.clockHasBeenSynced) {
     TimeUtils::applySystemClockFromRtc(true);
+  }
+
+  if (SETTINGS.autoSyncDay && !forceHomeBoot && !otaBoot && !koReaderRecoveryBoot && !recoveryFirmwareMode &&
+      !TimeUtils::wasTimeSyncedThisBoot()) {
+    RenderLock lock;
+    WIFI_STORE.loadFromFile();
   }
 
   const bool countUsefulStart = !isSilentReboot && !forceHomeBoot &&

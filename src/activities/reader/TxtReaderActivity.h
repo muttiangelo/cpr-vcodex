@@ -95,6 +95,7 @@ class TxtReaderActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool isReaderActivity() const override { return true; }
+  bool hasRenderedBookPage() const override { return pluginSession.hasRenderedPage(); }
   bool handleForcedRefresh() override {
     {
       RenderLock lock(*this);
