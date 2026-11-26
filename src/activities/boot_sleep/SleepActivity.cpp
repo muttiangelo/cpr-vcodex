@@ -1714,21 +1714,6 @@ void SleepActivity::renderReadingDashboardSleepScreen(const bool showWeeklyReadi
                   EpdFontFamily::BOLD);
   drawProgressBar(renderer, Rect{goalPanel.x + 18, goalPanel.y + 78, goalPanel.width - 36, 13}, goalPercent, 1);
 
-  if (showWeeklyReading) {
-    constexpr int top = 198;
-    constexpr int gap = 12;
-    constexpr int progressHeight = 70;
-    const int progressTop = pageHeight - 48 - 2 * progressHeight - gap;
-    drawWeeklyReadingChart(renderer, Rect{side, top, contentWidth, progressTop - gap - top});
-    const auto* book = getCurrentSleepBook();
-    drawMetricPanel(renderer, Rect{side, progressTop, contentWidth, progressHeight}, tr(STR_BOOK_PROGRESS),
-                    book ? formatPercent(book->completed ? 100 : book->lastProgressPercent) : "--");
-    drawMetricPanel(renderer, Rect{side, progressTop + progressHeight + gap, contentWidth, progressHeight},
-                    tr(STR_CHAPTER_PROGRESS), book ? formatPercent(book->chapterProgressPercent) : "--");
-    displaySleepBuffer(renderer);
-    return;
-  }
-
   const int cardGap = 10;
   const int cardWidth = (contentWidth - cardGap) / 2;
   const int cardHeight = 70;
@@ -1737,12 +1722,19 @@ void SleepActivity::renderReadingDashboardSleepScreen(const bool showWeeklyReadi
                   std::to_string(READING_STATS.getCurrentStreakDays()) + "d");
   drawMetricPanel(renderer, Rect{side + cardWidth + cardGap, metricsTop, cardWidth, cardHeight}, tr(STR_LAST_7D),
                   ReadingStatsAnalytics::formatDurationHm(READING_STATS.getRecentReadingMs(7)));
-  drawMetricPanel(renderer, Rect{side, metricsTop + cardHeight + cardGap, cardWidth, cardHeight}, tr(STR_TOTAL_TIME),
-                  ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()));
-  drawMetricPanel(renderer, Rect{side + cardWidth + cardGap, metricsTop + cardHeight + cardGap, cardWidth, cardHeight},
-                  tr(STR_BOOKS_FINISHED), std::to_string(READING_STATS.getBooksFinishedCount()));
+  const int secondRowTop = metricsTop + cardHeight + cardGap;
+  const Rect achievementPanel{side, 370, contentWidth, 138};
+  if (showWeeklyReading) {
+    drawWeeklyReadingChart(
+        renderer, Rect{side, secondRowTop, contentWidth, achievementPanel.y + achievementPanel.height - secondRowTop});
+  } else {
+    drawMetricPanel(renderer, Rect{side, secondRowTop, cardWidth, cardHeight}, tr(STR_TOTAL_TIME),
+                    ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()));
+    drawMetricPanel(renderer, Rect{side + cardWidth + cardGap, secondRowTop, cardWidth, cardHeight},
+                    tr(STR_BOOKS_FINISHED), std::to_string(READING_STATS.getBooksFinishedCount()));
+    drawAchievementPanel(renderer, achievementPanel, false);
+  }
 
-  drawAchievementPanel(renderer, Rect{side, 370, contentWidth, 138}, false);
   drawLatestBookPanel(renderer, Rect{side, 530, contentWidth, pageHeight - 578});
 
   displaySleepBuffer(renderer);
