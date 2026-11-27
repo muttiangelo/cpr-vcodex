@@ -2222,7 +2222,9 @@ void CrossPointWebServer::handleGetSettings() const {
       case WebSettingType::Enum: {
         sendJsonStringField(server.get(), "type", "enum");
         server->sendContent(",", 1);
-        if (s.valuePtr) {
+        if (s.valuePtr == &CrossPointSettings::readingHeatmapShortcut) {
+          sendJsonIntField(server.get(), "value", static_cast<int>(SETTINGS.getReadingHeatmapShortcutLocation()));
+        } else if (s.valuePtr) {
           sendJsonIntField(server.get(), "value", static_cast<int>(SETTINGS.*(s.valuePtr)));
         } else if (s.dynamic == WebDynamicSetting::KoMatchMethod) {
           sendJsonIntField(server.get(), "value", static_cast<int>(KOREADER_STORE.getMatchMethod()));

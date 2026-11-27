@@ -185,7 +185,7 @@ std::vector<HomeShortcutEntry> getHomeShortcutEntries(const bool hasOpdsServers)
     if (definition.id == ShortcutId::OpdsBrowser && !hasOpdsServers) {
       continue;
     }
-    const auto location = static_cast<CrossPointSettings::SHORTCUT_LOCATION>(SETTINGS.*(definition.locationPtr));
+    const auto location = getShortcutLocation(definition);
     if (location == CrossPointSettings::SHORTCUT_HOME && getShortcutVisibility(definition)) {
       entries.push_back(HomeShortcutEntry{&definition});
     }

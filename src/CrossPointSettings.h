@@ -309,6 +309,22 @@ class CrossPointSettings {
     OPDS_FILENAME_FORMAT_COUNT
   };
   enum SHORTCUT_LOCATION { SHORTCUT_HOME = 0, SHORTCUT_APPS = 1, SHORTCUT_LOCATION_COUNT };
+  static constexpr uint8_t SHORTCUT_LOCATION_DEFAULT = SHORTCUT_LOCATION_COUNT;
+
+  SHORTCUT_LOCATION getReadingHeatmapShortcutLocation() const {
+    if (readingHeatmapShortcut != SHORTCUT_LOCATION_DEFAULT) {
+      return static_cast<SHORTCUT_LOCATION>(readingHeatmapShortcut);
+    }
+    switch (uiTheme) {
+      case LYRA:
+      case LYRA_CUSTOM:
+      case LYRA_CAROUSEL:
+      case LYRA_3_COVERS:
+        return SHORTCUT_HOME;
+      default:
+        return SHORTCUT_APPS;
+    }
+  }
   enum HOME_BOOK_SOURCE { HOME_BOOKS_RECENTS = 0, HOME_BOOKS_FAVORITES = 1, HOME_BOOK_SOURCE_COUNT };
   enum SLEEP_IMAGE_ORDER { SLEEP_IMAGE_SHUFFLE = 0, SLEEP_IMAGE_SEQUENTIAL = 1, SLEEP_IMAGE_ORDER_COUNT };
 
@@ -518,7 +534,7 @@ class CrossPointSettings {
   uint8_t settingsShortcutOrder = 4;
   uint8_t readingStatsShortcut = SHORTCUT_APPS;
   uint8_t readingStatsShortcutOrder = 5;
-  uint8_t readingHeatmapShortcut = SHORTCUT_APPS;
+  uint8_t readingHeatmapShortcut = SHORTCUT_LOCATION_DEFAULT;
   uint8_t readingHeatmapShortcutOrder = 6;
   uint8_t readingProfileShortcut = SHORTCUT_APPS;
   uint8_t readingProfileShortcutOrder = 7;

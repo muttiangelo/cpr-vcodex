@@ -793,8 +793,8 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
       clamp(doc["readingStatsShortcut"] | s.readingStatsShortcut, shortcutLocationCount, s.readingStatsShortcut);
   s.readingStatsShortcutOrder = clamp(doc["readingStatsShortcutOrder"] | s.readingStatsShortcutOrder,
                                       shortcutOrderCount, s.readingStatsShortcutOrder);
-  s.readingHeatmapShortcut =
-      clamp(doc["readingHeatmapShortcut"] | s.readingHeatmapShortcut, shortcutLocationCount, s.readingHeatmapShortcut);
+  s.readingHeatmapShortcut = clamp(doc["readingHeatmapShortcut"] | S::SHORTCUT_LOCATION_DEFAULT, shortcutLocationCount,
+                                   S::SHORTCUT_LOCATION_DEFAULT);
   s.readingHeatmapShortcutOrder = clamp(doc["readingHeatmapShortcutOrder"] | s.readingHeatmapShortcutOrder,
                                         shortcutOrderCount, s.readingHeatmapShortcutOrder);
   s.readingProfileShortcut =
@@ -1194,7 +1194,9 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["settingsShortcutOrder"] = s.settingsShortcutOrder;
   doc["readingStatsShortcut"] = s.readingStatsShortcut;
   doc["readingStatsShortcutOrder"] = s.readingStatsShortcutOrder;
-  doc["readingHeatmapShortcut"] = s.readingHeatmapShortcut;
+  if (s.readingHeatmapShortcut != CrossPointSettings::SHORTCUT_LOCATION_DEFAULT) {
+    doc["readingHeatmapShortcut"] = s.readingHeatmapShortcut;
+  }
   doc["readingHeatmapShortcutOrder"] = s.readingHeatmapShortcutOrder;
   doc["readingProfileShortcut"] = s.readingProfileShortcut;
   doc["readingProfileShortcutOrder"] = s.readingProfileShortcutOrder;

@@ -459,7 +459,7 @@ std::string getShortcutLocationSettingValueText() {
   int homeCount = 1;  // Apps hub is always in Home.
   int appsCount = 0;
   for (const auto& definition : getShortcutDefinitions()) {
-    const auto location = static_cast<CrossPointSettings::SHORTCUT_LOCATION>(SETTINGS.*(definition.locationPtr));
+    const auto location = getShortcutLocation(definition);
     if (location == CrossPointSettings::SHORTCUT_HOME) {
       ++homeCount;
     } else {

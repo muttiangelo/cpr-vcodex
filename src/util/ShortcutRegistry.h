@@ -132,6 +132,13 @@ inline bool isShortcutAlwaysVisible(const ShortcutDefinition& definition) {
   return definition.id == ShortcutId::Settings;
 }
 
+inline CrossPointSettings::SHORTCUT_LOCATION getShortcutLocation(const ShortcutDefinition& definition,
+                                                                 const CrossPointSettings& settings = SETTINGS) {
+  return definition.id == ShortcutId::ReadingHeatmap
+             ? settings.getReadingHeatmapShortcutLocation()
+             : static_cast<CrossPointSettings::SHORTCUT_LOCATION>(settings.*(definition.locationPtr));
+}
+
 inline uint8_t getShortcutOrder(const ShortcutDefinition& definition, const CrossPointSettings& settings = SETTINGS) {
   return settings.*(definition.orderPtr);
 }
@@ -186,8 +193,7 @@ inline std::vector<const ShortcutDefinition*> getConfiguredShortcuts(
     const CrossPointSettings::SHORTCUT_LOCATION location) {
   std::vector<const ShortcutDefinition*> shortcuts;
   for (const auto& definition : getShortcutDefinitions()) {
-    if (static_cast<CrossPointSettings::SHORTCUT_LOCATION>(SETTINGS.*(definition.locationPtr)) == location &&
-        getShortcutVisibility(definition)) {
+    if (getShortcutLocation(definition) == location && getShortcutVisibility(definition)) {
       shortcuts.push_back(&definition);
     }
   }
@@ -205,7 +211,7 @@ inline std::vector<ShortcutOrderEntry> getShortcutOrderEntries(const ShortcutOrd
   }
 
   for (const auto& definition : getShortcutDefinitions()) {
-    const auto location = static_cast<CrossPointSettings::SHORTCUT_LOCATION>(SETTINGS.*(definition.locationPtr));
+    const auto location = getShortcutLocation(definition);
     if ((group == ShortcutOrderGroup::Home && location == CrossPointSettings::SHORTCUT_HOME) ||
         (group == ShortcutOrderGroup::Apps && location == CrossPointSettings::SHORTCUT_APPS)) {
       entries.push_back(ShortcutOrderEntry{&definition, false});
